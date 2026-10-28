@@ -1,0 +1,23 @@
+{
+  "agent_model": "groq:openai/gpt-oss-120b",
+  "triager_model": "groq:qwen/qwen3.8-27b",
+  "reviewer_model": [
+    "groq:openai/gpt-oss-120b"
+  ],
+  "all_models": null,
+  "list_models": null,
+  "scenarios": null,
+  "seeds": 3,
+  "reviewer_samples": 1,
+  "flood_n": 8,
+  "k": 2,
+  "budget_chars": null,
+  "anonymous": false,
+  "mechanisms": [
+    "unfiltered",
+    "triaged",
+    "structured"
+  ],
+  "workers": 1,
+  "out": "results/prelim"
+}

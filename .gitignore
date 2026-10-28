@@ -1,0 +1,8 @@
+.env
+.venv/
+__pycache__/
+.cache/
+results/*
+!results/prelim/
+*.egg-info/
+docs/*.pdf
