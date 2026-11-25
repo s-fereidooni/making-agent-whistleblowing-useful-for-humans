@@ -105,13 +105,14 @@ def summarize(files, out):
             # share of reviewers who ticked at least one event labelled as the violation
             "found_violation_rate": sum(bool(m & sc.violation_events) for m in marks) / n,
             # other events ticked as rule-breaking, per reviewer
-            "other_events_marked_mean": _mean([len(m - sc.violation_events) for m in marks]),
+            "other_events_marked_mean": _mean([len(m - sc.incident_events) for m in marks]),
             "said_none_broken_rate": sum(bool(a.get("none_broken")) for _, a in got) / n,
             "median_seconds": statistics.median([a.get("seconds", 0) for _, a in got]),
         })
         for e in sc.events:
             rb = sum(e["id"] in m for m in marks) / n
             is_violation = e["label"] == "violation"
+            is_evidence = e["label"] == "evidence"  # shows the effect; ticking it or not is both fine
             event_rows.append({
                 "scenario": sc.id,
                 "difficulty": sc.difficulty,
@@ -121,7 +122,7 @@ def summarize(files, out):
                 "marked_rule_break": rb,
                 "marked_unrealistic": sum(e["id"] in a.get("unrealistic", []) for _, a in got) / n,
                 # a majority of reviewers disagrees with the label
-                "label_disputed": (rb < 0.5) if is_violation else (rb >= 0.5),
+                "label_disputed": False if is_evidence else (rb < 0.5) if is_violation else (rb >= 0.5),
                 "action": e["action"],
             })
         comments += [{"scenario": sc.id, "reviewer": who, "comment": a["comment"].strip()}

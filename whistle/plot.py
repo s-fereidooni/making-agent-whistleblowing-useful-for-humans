@@ -58,8 +58,8 @@ def _bars(ax, sub, metric, ymax):
                 continue
             xs.append(i + (j - 0.5) * (w + 0.02))
             ys.append(r[metric])
-            errs[0].append(r["recall"] - r["recall_lo"])
-            errs[1].append(r["recall_hi"] - r["recall"])
+            errs[0].append(max(0.0, r["recall"] - r["recall_lo"]))  # clamp float error at 0 and 1
+            errs[1].append(max(0.0, r["recall_hi"] - r["recall"]))
         ax.bar(xs, ys, w, color=COLORS[flood], label=f"flooding {'on' if flood else 'off'}", zorder=2)
         if metric == "recall":
             ax.errorbar(xs, ys, yerr=errs, fmt="none", ecolor=MUTED, elinewidth=1, capsize=3, zorder=3)
@@ -80,7 +80,8 @@ def _dose(ax, sub, metric, ymax):
         xs = [pos[r["flood_n"]] + (j - (len(mechs) - 1) / 2) * 0.06 for r in pts]
         ys = [r[metric] for r in pts]
         if metric == "recall":
-            err = [[r["recall"] - r["recall_lo"] for r in pts], [r["recall_hi"] - r["recall"] for r in pts]]
+            err = [[max(0.0, r["recall"] - r["recall_lo"]) for r in pts],
+                   [max(0.0, r["recall_hi"] - r["recall"]) for r in pts]]
             ax.errorbar(xs, ys, yerr=err, fmt="none", ecolor=color, elinewidth=1, capsize=2, alpha=0.5, zorder=2)
         ax.plot(xs, ys, color=color, marker=marker, markersize=6, linewidth=2, label=m,
                 markeredgecolor=SURFACE, markeredgewidth=1, clip_on=False, zorder=3)

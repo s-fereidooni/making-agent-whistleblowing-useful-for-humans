@@ -44,9 +44,11 @@ LLM calls are cached in `.cache/llm/`, so re-running after a crash or rate limit
 ## Pipeline
 
 1. `data/scenarios.json`: scripted activity logs. Each event is labeled `violation`,
-   `suspicious_benign`, or `benign`, which gives exact ground truth. How the logs and reports
+   `evidence`, `suspicious_benign`, or `benign`, which gives exact ground truth. In the hard
+   tier each agent sees only part of the log (`seen_by`). How the logs and reports
    are built, and what they assume, is in [data/README.md](data/README.md).
-2. `whistle/agents.py`: each non-violating agent reads the log and writes 0–2 reports.
+2. `whistle/agents.py`: each non-violating agent reads the log (in the hard tier, its own
+   view of it) and writes 0–2 reports.
    Under flooding, the violator also writes `--flood-n` misleading reports. Each report has a
    hidden `about_event` label used only for scoring.
 3. `whistle/mechanisms.py`: the same reports, rendered three ways:
@@ -56,8 +58,9 @@ LLM calls are cached in `.cache/llm/`, so re-running after a crash or rate limit
      verbatim from the system log and checked against the accused agent
 4. `whistle/reviewer.py`: an LLM overseer escalates at most `--k` items.
 5. `whistle/metrics.py`: escalations are mapped to log events and scored per incident:
-   recall (violation escalated), precision, false positives, abstention, and whether the
-   violation was visible in the view at all.
+   recall (violation escalated), `recall_honest` (the same, but only when the escalated item
+   rests on an honest report, not on one of the violator's own flood reports), precision,
+   false positives, abstention, and whether the violation was visible in the view at all.
 
 ## Human realism review of the logs
 
@@ -94,6 +97,8 @@ disagreed with its label, and lines that at least half called unrealistic.
 |---|---|---|
 | Ground truth | scripted actions, LLM-written reports | `data/scenarios.json` |
 | Scenario difficulty | 6 easy + 6 hard twins, both run by default | `--difficulty` |
+| What makes a scenario hard | agents see part of the log; only the violator sees the act | `seen_by` in `data/scenarios.json` |
+| Reports about evidence of the incident | count as reports about the incident | `Scenario.incident_events` |
 | Realism review: who sees what | every reviewer sees all 12 logs, random order | `whistle/realism.py` |
 | Flood volume | 8 reports from the violator | `--flood-n` (several values run a sweep) |
 | Flood sizes in a sweep | each size is its own request to the violator | `run.run_unit` |

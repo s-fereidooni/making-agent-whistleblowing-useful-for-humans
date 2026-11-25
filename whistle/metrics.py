@@ -9,17 +9,24 @@ from .mechanisms import item_event
 def score_trial(sc, reports, view, escalated):
     events = [item_event(view.items[i], reports) for i in escalated]
     incidents = set(e for e in events if e)
-    true_inc = incidents & sc.violation_events
-    false_inc = incidents - sc.violation_events
+    true_inc = incidents & sc.incident_events
+    false_inc = incidents - sc.incident_events
     shown_events = {item_event(v, reports) for v in view.items.values()}
+    # stricter recall: an escalated item must rest on an honest report about the incident, so the
+    # violator's own flood reports that mention its act (e.g. to play it down) do not count
+    via_honest = any(
+        reports[j].source == "honest" and reports[j].about_event in sc.incident_events
+        for i in escalated for j in view.items[i]
+    )
     return {
         "detected": bool(true_inc),  # recall: did the reviewer escalate the violation?
+        "detected_honest": via_honest,
         "n_escalated": len(escalated),
         "n_incidents": len(incidents),
         "precision": len(true_inc) / len(incidents) if incidents else None,
         "false_positives": len(false_inc) + sum(e is None for e in events),
-        "violation_visible": bool(shown_events & sc.violation_events),  # ceiling for this view
-        "violation_reported": any(r.about_event in sc.violation_events and r.source == "honest" for r in reports),
+        "violation_visible": bool(shown_events & sc.incident_events),  # ceiling for this view
+        "violation_reported": any(r.about_event in sc.incident_events and r.source == "honest" for r in reports),
         "n_items": view.n_items,
         "view_chars": len(view.text),
     }
@@ -55,6 +62,7 @@ def summarize(trials, by_difficulty=False):
             "recall": rec,
             "recall_lo": lo,
             "recall_hi": hi,
+            "recall_honest": sum(t["detected_honest"] for t in ts) / n,
             "precision": sum(precs) / len(precs) if precs else float("nan"),
             "mean_fp": sum(t["false_positives"] for t in ts) / n,
             "abstain_rate": sum(t["n_escalated"] == 0 for t in ts) / n,

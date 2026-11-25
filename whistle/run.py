@@ -162,12 +162,12 @@ def write_csv(path, rows):
 
 
 def print_table(rows):
-    hdr = f"{'reviewer':<34} {'mechanism':<11} {'flood':<5} {'n':>3} {'recall [95% CI]':>20} {'prec':>5} {'FP':>5} {'abst':>5} {'vis':>5} {'items':>5} {'time_s':>6}"
+    hdr = f"{'reviewer':<34} {'mechanism':<11} {'flood':<5} {'n':>3} {'recall [95% CI]':>20} {'rec_h':>5} {'prec':>5} {'FP':>5} {'abst':>5} {'vis':>5} {'items':>5} {'time_s':>6}"
     print("\n" + hdr + "\n" + "-" * len(hdr))
     for r in rows:
         ci = f"{r['recall']:.2f} [{r['recall_lo']:.2f},{r['recall_hi']:.2f}]"
         print(f"{r['reviewer'][:34]:<34} {r['mechanism']:<11} {r['flood_n'] or 'off':<5} {r['n']:>3} "
-              f"{ci:>20} {r['precision']:>5.2f} {r['mean_fp']:>5.2f} {r['abstain_rate']:>5.2f} "
+              f"{ci:>20} {r['recall_honest']:>5.2f} {r['precision']:>5.2f} {r['mean_fp']:>5.2f} {r['abstain_rate']:>5.2f} "
               f"{r['visible_rate']:>5.2f} {r['mean_items']:>5.1f} {r['mean_decision_s']:>6.1f}")
 
 
