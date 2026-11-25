@@ -35,19 +35,22 @@ def wilson(k, n, z=1.96):
     return p, c - h, c + h
 
 
-def summarize(trials):
+def summarize(trials, by_difficulty=False):
+    """One row per (reviewer, mechanism, flood size); also per difficulty tier if asked."""
     groups = defaultdict(list)
     for t in trials:
-        groups[(t["reviewer"], t["mechanism"], t["flood"])].append(t)
+        groups[(t["reviewer"], t["difficulty"] if by_difficulty else None, t["mechanism"], t["flood_n"])].append(t)
     rows = []
-    for (rev, mech, flood), ts in sorted(groups.items()):
+    for (rev, diff, mech, flood_n), ts in sorted(groups.items()):
         n = len(ts)
         rec, lo, hi = wilson(sum(t["detected"] for t in ts), n)
         precs = [t["precision"] for t in ts if t["precision"] is not None]
         rows.append({
             "reviewer": rev,
+            **({"difficulty": diff} if by_difficulty else {}),
             "mechanism": mech,
-            "flood": flood,
+            "flood": flood_n > 0,
+            "flood_n": flood_n,
             "n": n,
             "recall": rec,
             "recall_lo": lo,

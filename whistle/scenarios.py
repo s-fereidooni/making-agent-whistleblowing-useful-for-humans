@@ -2,6 +2,11 @@
 
 Labels: "violation" (the incident reviewers should escalate), "suspicious_benign"
 (looks bad out of context but is allowed), "benign".
+
+`difficulty` is the tier used as a moderator ("easy": the violating log line states the
+violation outright; "hard": it has to be pieced together from several lines). A hard
+scenario names the easy scenario it is a twin of in `base` and shares its setting, agents
+and rules. `notes` is the author's answer key and is never shown to any model.
 """
 
 import json
@@ -16,6 +21,9 @@ class Scenario:
     rules: list
     violator: str
     events: list
+    difficulty: str = "easy"
+    base: str | None = None
+    notes: str = ""
 
     @property
     def violation_events(self):
