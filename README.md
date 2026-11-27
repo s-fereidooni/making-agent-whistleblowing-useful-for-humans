@@ -91,6 +91,51 @@ disagreed with its label, and lines that at least half called unrealistic.
   the main reviewer study.
 - `review/responses/` is git-ignored because the files carry the reviewers' initials.
 
+## Human reviewer study
+
+People do the reviewer's job on the same reports the LLM reviewer saw.
+
+```bash
+uv run python -m whistle.study freeze results/prelim results/<hard run>   # writes study/packets.json
+uv run python -m whistle.study build                                      # writes study/study.html
+```
+
+`freeze` copies one seed per scenario out of saved runs: the reports and the exact view each
+channel produced, with and without flooding. Nothing is regenerated. `study/packets.json`
+holds the ground truth and stays with the team. `build` writes `study/study.html`, one
+self-contained page with no labels, tiers, scenario names or condition names in it.
+
+Give each participant a number and send them the page. For every scenario they read an
+untimed briefing (setting, team, rules), then get two minutes to read the channel output and
+escalate at most two items. A practice round comes first. At the end they download
+`study_p<number>.json` and send it back. Put the files in `study/responses/`.
+
+```bash
+uv run python -m whistle.study summarize study/responses/*.json
+uv run python -m whistle.plot study/summary
+```
+
+This scores people with the same code as the LLM reviewers and prints the LLM reviewer's
+result on the same packets next to them.
+
+- **Conditions.** The participant number decides which of the six conditions (three channels,
+  flooding on or off) goes with each scenario. Each participant sees every scenario once and
+  every condition once per tier. Each scenario-condition pair is seen once per six
+  participants, so use numbers 1 to 6, 1 to 12, and so on. Scenario order is random per
+  participant, and a scenario is never shown right after its twin.
+- **Time limit.** `build --seconds 120` sets it. The clock covers the channel output only, and
+  keeps running if the participant leaves the page. At zero, the choices made so far count.
+- **The packets in the repo** are seed 0 of `results/prelim` (easy tier) and of a
+  `gpt-oss-120b` run of the hard tier on 2026-11-25. In all 72 views at least one item is
+  about the incident.
+- **After changing a log**, re-run that scenario, then `freeze` and `build` again. `freeze`
+  refuses a run made on an older version of a log.
+- **Not tested with a person yet.** The page was checked in a browser and the scoring on
+  simulated responses. Pilot it before recruiting.
+- **Every scenario contains a violation.** A participant can learn that escalating something
+  is always right. Scenarios with no violation are not written yet.
+- People who did the realism review have seen the logs and should not take part.
+
 ## Provisional design choices (to be decided by the team)
 
 | Choice | Current default | Flag |
@@ -128,5 +173,5 @@ implemented the pipeline (scenarios, agent prompts, reporting mechanisms, LLM re
 plotting), drafted the six scenario logs, proposed the provisional defaults listed above, and
 ran the preliminary experiment. After the midway feedback, Claude Fable 5.2 (also in Claude Code)
 wrote the dataset description in `data/README.md`, the flood-size sweep, the realism review
-form, and the six hard scenarios, which the team has not yet reviewed. Our team reviewed the implementation and the outputs and decides
+form, the human study page and its scoring (`whistle/study.py`), and the six hard scenarios, which the team has not yet reviewed. Our team reviewed the implementation and the outputs and decides
 the methodological choices.
