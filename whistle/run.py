@@ -24,13 +24,24 @@ from .reviewer import review
 from .scenarios import load_scenarios
 
 
+def flood_levels(flood_n):
+    """Sorted distinct flood sizes, always including 0 (the no-flooding baseline)."""
+    return [0] + sorted({n for n in flood_n if n > 0})
+
+
 def run_unit(sc, seed, args, agent_llm, triager_llm, reviewer_llms):
-    """One (scenario, seed): generate reports once, then show them through every arm."""
+    """One (scenario, seed): generate reports once, then show them through every arm.
+
+    The honest reports are generated once and reused at every flood size, so arms differ
+    only in the flood. Each flood size is a separate request to the violator for exactly
+    that many reports (not a subset of a larger batch).
+    """
     honest = honest_reports(agent_llm, sc, seed)
-    flood = flood_reports(agent_llm, sc, seed, args.flood_n) if args.flood_n else []
+    floods = {n: flood_reports(agent_llm, sc, seed, n) if n else [] for n in flood_levels(args.flood_n)}
     trials, records = [], []
-    for flood_on in (False, True):
-        reports = honest + flood if flood_on else honest
+    for n, flood in floods.items():
+        flood_on = n > 0
+        reports = honest + flood
         for mech in args.mechanisms:
             view = MECHANISMS[mech](
                 reports, sc, seed=f"{seed}/{flood_on}", llm=triager_llm, show_authors=not args.anonymous
@@ -42,9 +53,12 @@ def run_unit(sc, seed, args, agent_llm, triager_llm, reviewer_llms):
                     )
                     t = {
                         "scenario": sc.id,
+                        "difficulty": sc.difficulty,
                         "seed": seed,
                         "reviewer_sample": rs,
                         "flood": flood_on,
+                        "flood_n": n,  # requested size
+                        "n_flood_reports": len(flood),  # what the violator actually returned
                         "mechanism": mech,
                         "reviewer": rev_llm.spec,
                         "escalated": esc,
@@ -55,7 +69,7 @@ def run_unit(sc, seed, args, agent_llm, triager_llm, reviewer_llms):
                     trials.append(t)
                     records.append({**t, "view_shown": shown, "items": view.items})
     reports_dump = {"scenario": sc.id, "seed": seed, "honest": [asdict(r) for r in honest],
-                    "flood": [asdict(r) for r in flood]}
+                    "flood": {str(n): [asdict(r) for r in f] for n, f in floods.items() if n}}
     return trials, records, reports_dump
 
 
@@ -67,9 +81,11 @@ def main():
     p.add_argument("--all-models", help="use this provider:model for every role")
     p.add_argument("--list-models", metavar="PROVIDER")
     p.add_argument("--scenarios", nargs="*", help="scenario ids (default: all)")
+    p.add_argument("--difficulty", nargs="*", help="difficulty tiers to run, e.g. easy hard (default: all)")
     p.add_argument("--seeds", type=int, default=3, help="independent report generations per scenario")
     p.add_argument("--reviewer-samples", type=int, default=1, help="reviewer samples per view")
-    p.add_argument("--flood-n", type=int, default=8, help="number of flooding reports")
+    p.add_argument("--flood-n", type=int, nargs="+", default=[8],
+                   help="number of flooding reports; give several (e.g. 2 4 8 16 32) for a dose-response sweep")
     p.add_argument("--k", type=int, default=2, help="max escalations per scenario")
     p.add_argument("--budget-chars", type=int, default=None, help="truncate reviewer view (time-limit proxy)")
     p.add_argument("--anonymous", action="store_true", help="hide report authors from triager and reviewer")
@@ -94,6 +110,8 @@ def main():
     scenarios = load_scenarios()
     if args.scenarios:
         scenarios = [s for s in scenarios if s.id in args.scenarios]
+    if args.difficulty:
+        scenarios = [s for s in scenarios if s.difficulty in args.difficulty]
 
     out = Path(args.out or f"results/{time.strftime('%Y%m%d-%H%M%S')}")
     out.mkdir(parents=True, exist_ok=True)
@@ -114,30 +132,42 @@ def main():
             all_trials += trials
             all_records += records
             all_reports.append(reports)
-            print(f"[{n}/{len(units)}] {sid} seed {seed}: {len(reports['honest'])} honest, "
-                  f"{len(reports['flood'])} flood reports")
+            sizes = "/".join(str(len(f)) for f in reports["flood"].values()) or "0"
+            print(f"[{n}/{len(units)}] {sid} seed {seed}: {len(reports['honest'])} honest, {sizes} flood reports")
 
     with open(out / "trials.jsonl", "w") as fh:
         fh.writelines(json.dumps(r) + "\n" for r in all_records)
     (out / "reports.json").write_text(json.dumps(all_reports, indent=2))
 
     rows = summarize(all_trials)
-    if rows:
-        with open(out / "summary.csv", "w", newline="") as fh:
-            w = csv.DictWriter(fh, fieldnames=list(rows[0]))
-            w.writeheader()
-            w.writerows(rows)
+    write_csv(out / "summary.csv", rows)
     print_table(rows)
+    tiers = sorted({t["difficulty"] for t in all_trials})
+    if len(tiers) > 1:  # summary.csv pools the tiers; this one keeps them apart
+        by_tier = summarize(all_trials, by_difficulty=True)
+        write_csv(out / "summary_by_difficulty.csv", by_tier)
+        for tier in tiers:
+            print(f"\ndifficulty: {tier}")
+            print_table([r for r in by_tier if r["difficulty"] == tier])
     print(f"\nwrote {out}/  (plot with: uv run python -m whistle.plot {out})")
 
 
+def write_csv(path, rows):
+    if not rows:
+        return
+    with open(path, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        w.writeheader()
+        w.writerows(rows)
+
+
 def print_table(rows):
-    hdr = f"{'reviewer':<34} {'mechanism':<11} {'flood':<5} {'n':>3} {'recall [95% CI]':>20} {'prec':>5} {'FP':>5} {'abst':>5} {'vis':>5} {'items':>5} {'time_s':>6}"
+    hdr = f"{'reviewer':<34} {'mechanism':<11} {'flood':<5} {'n':>3} {'recall [95% CI]':>20} {'rec_h':>5} {'prec':>5} {'FP':>5} {'abst':>5} {'vis':>5} {'items':>5} {'time_s':>6}"
     print("\n" + hdr + "\n" + "-" * len(hdr))
     for r in rows:
         ci = f"{r['recall']:.2f} [{r['recall_lo']:.2f},{r['recall_hi']:.2f}]"
-        print(f"{r['reviewer'][:34]:<34} {r['mechanism']:<11} {'on' if r['flood'] else 'off':<5} {r['n']:>3} "
-              f"{ci:>20} {r['precision']:>5.2f} {r['mean_fp']:>5.2f} {r['abstain_rate']:>5.2f} "
+        print(f"{r['reviewer'][:34]:<34} {r['mechanism']:<11} {r['flood_n'] or 'off':<5} {r['n']:>3} "
+              f"{ci:>20} {r['recall_honest']:>5.2f} {r['precision']:>5.2f} {r['mean_fp']:>5.2f} {r['abstain_rate']:>5.2f} "
               f"{r['visible_rate']:>5.2f} {r['mean_items']:>5.1f} {r['mean_decision_s']:>6.1f}")
 
 

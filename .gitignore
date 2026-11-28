@@ -6,3 +6,6 @@ results/*
 !results/prelim/
 *.egg-info/
 docs/*.pdf
+review/responses/
+review/summary/
+study/summary/

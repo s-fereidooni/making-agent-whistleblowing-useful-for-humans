@@ -84,6 +84,8 @@ class LLM:
             response = self._call(system, user, temperature)
         latency = time.perf_counter() - t0
 
+        if not response.strip():  # an empty reply is a failed call; caching it would replay the failure forever
+            return response, latency
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"spec": self.spec, "task": task, "response": response, "latency_s": latency}))
         return response, latency
@@ -105,7 +107,7 @@ class LLM:
     def _call(self, system, user, temperature):
         from openai import APIConnectionError, APIStatusError, RateLimitError
 
-        for attempt in range(8):
+        for attempt in range(30):
             try:
                 r = self.client.chat.completions.create(
                     model=self.model,
@@ -115,6 +117,11 @@ class LLM:
                 return r.choices[0].message.content or ""
             except (RateLimitError, APIConnectionError) as e:
                 wait = min(60, 2**attempt) + random.random()
+                asked = _retry_after(e)
+                if asked is not None:
+                    if asked > 900:  # a daily cap, not a per-minute one: retrying will not help soon
+                        raise RuntimeError(f"{self.spec}: rate limited for another {asked / 60:.0f} min") from e
+                    wait = asked + 1 + random.random()
                 print(f"  [{self.spec}] {type(e).__name__}, retrying in {wait:.0f}s")
                 time.sleep(wait)
             except APIStatusError as e:
@@ -126,6 +133,14 @@ class LLM:
 
     def list_models(self):
         return sorted(m.id for m in self.client.models.list().data)
+
+
+def _retry_after(err):
+    """Seconds the provider asked us to wait, if it said."""
+    try:
+        return float(err.response.headers.get("retry-after"))
+    except (AttributeError, TypeError, ValueError):
+        return None
 
 
 def _mock_response(task, user, key):

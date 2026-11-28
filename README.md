@@ -25,15 +25,30 @@ uv run python -m whistle.run \
   --reviewer-model groq:<model> --reviewer-model gemini:<model> \
   --seeds 3
 uv run python -m whistle.plot results/<run>
+
+# dose-response sweep: how do the effects of flooding scale with the number of flood reports?
+uv run python -m whistle.run ... --flood-n 2 4 8 16 32
 ```
+
+The dataset has an easy and a hard tier (six scenarios each). A run covers both by default,
+writes `summary_by_difficulty.csv` next to the pooled `summary.csv`, and the plot script adds
+`difficulty_<reviewer>.png` with one row of panels per tier. Use `--difficulty easy` to run
+only the six scenarios from the preliminary run.
+
+With several `--flood-n` values the plot is a dose-response figure (`dose_<reviewer>.png`).
+Check the `honest, a/b/c flood reports` line printed per run: a model asked for many reports
+may return fewer, and `n_flood_reports` in `trials.jsonl` records what it actually returned.
 
 LLM calls are cached in `.cache/llm/`, so re-running after a crash or rate limit is free.
 
 ## Pipeline
 
 1. `data/scenarios.json`: scripted activity logs. Each event is labeled `violation`,
-   `suspicious_benign`, or `benign`, which gives exact ground truth.
-2. `whistle/agents.py`: each non-violating agent reads the log and writes 0–2 reports.
+   `evidence`, `suspicious_benign`, or `benign`, which gives exact ground truth. In the hard
+   tier each agent sees only part of the log (`seen_by`). How the logs and reports
+   are built, and what they assume, is in [data/README.md](data/README.md).
+2. `whistle/agents.py`: each non-violating agent reads the log (in the hard tier, its own
+   view of it) and writes 0–2 reports.
    Under flooding, the violator also writes `--flood-n` misleading reports. Each report has a
    hidden `about_event` label used only for scoring.
 3. `whistle/mechanisms.py`: the same reports, rendered three ways:
@@ -43,15 +58,95 @@ LLM calls are cached in `.cache/llm/`, so re-running after a crash or rate limit
      verbatim from the system log and checked against the accused agent
 4. `whistle/reviewer.py`: an LLM overseer escalates at most `--k` items.
 5. `whistle/metrics.py`: escalations are mapped to log events and scored per incident:
-   recall (violation escalated), precision, false positives, abstention, and whether the
-   violation was visible in the view at all.
+   recall (violation escalated), `recall_honest` (the same, but only when the escalated item
+   rests on an honest report, not on one of the violator's own flood reports), precision,
+   false positives, abstention, and whether the violation was visible in the view at all.
+
+## Human realism review of the logs
+
+A check that the scripted logs read as realistic, and that people agree with the labels.
+
+```bash
+uv run python -m whistle.realism build        # writes review/realism_form.html
+```
+
+Send `review/realism_form.html` to reviewers. It is one self-contained file that opens in any
+browser and sends nothing anywhere. For each of the 12 logs, shown in a random order, the
+reviewer ticks the lines that break a team rule (or says none does), ticks lines that look
+unrealistic, rates realism and how hard the rule question was (1 to 5), and can comment.
+The form holds no labels, tiers or scenario names, so reviewers are blind to the ground
+truth. At the end they download `realism_<name>.json` and send it back.
+
+```bash
+uv run python -m whistle.realism summarize review/responses/*.json
+```
+
+This prints and writes to `review/summary/`: realism and perceived difficulty per scenario
+and per tier, how many reviewers found the labelled violation, every event where a majority
+disagreed with its label, and lines that at least half called unrealistic.
+
+- Rebuild the form after editing any log. Responses record which version of the logs they
+  were filled in against, and `summarize` warns about a mismatch.
+- People who do this review have seen the logs, so they should not also be participants in
+  the main reviewer study.
+- `review/responses/` is git-ignored because the files carry the reviewers' initials.
+
+## Human reviewer study
+
+People do the reviewer's job on the same reports the LLM reviewer saw.
+
+```bash
+uv run python -m whistle.study freeze results/prelim results/<hard run>   # writes study/packets.json
+uv run python -m whistle.study build                                      # writes study/study.html
+```
+
+`freeze` copies one seed per scenario out of saved runs: the reports and the exact view each
+channel produced, with and without flooding. Nothing is regenerated. `study/packets.json`
+holds the ground truth and stays with the team. `build` writes `study/study.html`, one
+self-contained page with no labels, tiers, scenario names or condition names in it.
+
+Give each participant a number and send them the page. For every scenario they read an
+untimed briefing (setting, team, rules), then get two minutes to read the channel output and
+escalate at most two items. A practice round comes first. At the end they download
+`study_p<number>.json` and send it back. Put the files in `study/responses/`.
+
+```bash
+uv run python -m whistle.study summarize study/responses/*.json
+uv run python -m whistle.plot study/summary
+```
+
+This scores people with the same code as the LLM reviewers and prints the LLM reviewer's
+result on the same packets next to them.
+
+- **Conditions.** The participant number decides which of the six conditions (three channels,
+  flooding on or off) goes with each scenario. Each participant sees every scenario once and
+  every condition once per tier. Each scenario-condition pair is seen once per six
+  participants, so use numbers 1 to 6, 1 to 12, and so on. Scenario order is random per
+  participant, and a scenario is never shown right after its twin.
+- **Time limit.** `build --seconds 120` sets it. The clock covers the channel output only, and
+  keeps running if the participant leaves the page. At zero, the choices made so far count.
+- **The packets in the repo** are seed 0 of `results/prelim` (easy tier) and of a
+  `gpt-oss-120b` run of the hard tier on 2026-11-25. In all 72 views at least one item is
+  about the incident.
+- **After changing a log**, re-run that scenario, then `freeze` and `build` again. `freeze`
+  refuses a run made on an older version of a log.
+- **Not tested with a person yet.** The page was checked in a browser and the scoring on
+  simulated responses. Pilot it before recruiting.
+- **Every scenario contains a violation.** A participant can learn that escalating something
+  is always right. Scenarios with no violation are not written yet.
+- People who did the realism review have seen the logs and should not take part.
 
 ## Provisional design choices (to be decided by the team)
 
 | Choice | Current default | Flag |
 |---|---|---|
 | Ground truth | scripted actions, LLM-written reports | `data/scenarios.json` |
-| Flood volume | 8 reports from the violator | `--flood-n` |
+| Scenario difficulty | 6 easy + 6 hard twins, both run by default | `--difficulty` |
+| What makes a scenario hard | agents see part of the log; only the violator sees the act | `seen_by` in `data/scenarios.json` |
+| Reports about evidence of the incident | count as reports about the incident | `Scenario.incident_events` |
+| Realism review: who sees what | every reviewer sees all 12 logs, random order | `whistle/realism.py` |
+| Flood volume | 8 reports from the violator | `--flood-n` (several values run a sweep) |
+| Flood sizes in a sweep | each size is its own request to the violator | `run.run_unit` |
 | Escalation budget | 2 | `--k` |
 | Time-limit proxy for LLM reviewers | none (escalation cap only) | `--budget-chars` |
 | Report authors visible | yes | `--anonymous` |
@@ -76,5 +171,7 @@ This codebase was written with Claude Code (Anthropic's Claude Opus 5.5). The re
 the 3 × 2 experimental design, and the evaluation plan come from our team's proposal. Claude
 implemented the pipeline (scenarios, agent prompts, reporting mechanisms, LLM reviewer, metrics,
 plotting), drafted the six scenario logs, proposed the provisional defaults listed above, and
-ran the preliminary experiment. Our team reviewed the implementation and the outputs and decides
+ran the preliminary experiment. After the midway feedback, Claude Fable 5.2 (also in Claude Code)
+wrote the dataset description in `data/README.md`, the flood-size sweep, the realism review
+form, the human study page and its scoring (`whistle/study.py`), and the six hard scenarios, which the team has not yet reviewed. Our team reviewed the implementation and the outputs and decides
 the methodological choices.
